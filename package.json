@@ -6,6 +6,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "stremio-addon-sdk": "1.6.10"
+    "stremio-addon-sdk": "^1.6.10"
   }
 }
