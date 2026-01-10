@@ -1,53 +1,40 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 
-// 1. تعريف الإضافة
+// المانيفست
 const manifest = {
-    id: 'com.souhail.stremio',
+    id: 'org.souhail.stremio',
     version: '1.0.0',
-    name: 'SOUHAIL / RD',
-    description: 'تورنتات مع Real-Debrid - Souhail Archive',
-    logo: 'https://i.imgur.com/7VTVVc1.png',
+    name: 'SOUHAIL',
+    description: 'Torrents with Real-Debrid',
+    logo: 'https://via.placeholder.com/100x100/2c3e50/ffffff?text=SOUHAIL',
     resources: ['stream'],
     types: ['movie'],
-    catalogs: [],
-    idPrefixes: ['tt']
+    catalogs: []
 };
 
 const builder = new addonBuilder(manifest);
 
-// 2. تعريف كيفية البحث
-builder.defineStreamHandler(async ({ type, id }) => {
-    console.log(`🎬 طلب فيلم: ${id}`);
+// معالج الستريمات
+builder.defineStreamHandler(async (args) => {
+    console.log('Request:', args);
     
-    // استخراج اسم الفيلم
-    let movieName = id;
-    if (id.includes(':')) {
-        const parts = id.split(':');
-        if (parts.length > 1) {
-            movieName = parts[1].replace(/\(\d{4}\)/, '').trim();
-        }
-    }
-    
-    // نتائج تجريبية
-    const streams = [
-        {
-            name: '💎 SOUHAIL / RD',
-            title: `🎬 ${movieName}\n✅ الإضافة تعمل بنجاح!\n✨ جودة: 1080p | سيدرز: 150\n🔧 Real-Debrid: قيد التطوير`,
-            url: ''
-        },
-        {
-            name: '📺 مثال تشغيل',
-            title: '🎬 Big Buck Bunny (تجريبي)\n📊 1080p | 💾 450 ميجا\n✅ يعمل في المتصفح',
-            url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-        }
-    ];
-    
-    return { streams };
+    // بغينا نرجعو stream واحد بسيط
+    return {
+        streams: [
+            {
+                name: 'SOUHAIL',
+                title: 'Test Stream - Addon is working!',
+                url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+            }
+        ]
+    };
 });
 
-// 3. تشغيل الخادم
-const port = process.env.PORT || 7000;
-console.log(`🚀 تشغيل إضافة SOUHAIL على البورت ${port}...`);
-console.log(`📡 رابط المانيفست: http://localhost:${port}/manifest.json`);
+// تشغيل الخادم
+const port = process.env.PORT || 3000;
+console.log(`Starting SOUHAIL addon on port ${port}`);
 
-serveHTTP(builder.getInterface(), { port: port });
+serveHTTP(builder.getInterface(), { 
+    port: port,
+    static: null // مهم!
+});
