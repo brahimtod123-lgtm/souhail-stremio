@@ -5,7 +5,7 @@ const RD_API_KEY = process.env.RD_API_KEY || '';
 
 const manifest = {
     id: 'org.souhail.streams',
-    version: '1.1.0',
+    version: '1.2.0',
     name: 'Souhail RD Streams',
     description: 'Real-Debrid streaming with torrent search',
     logo: 'https://img.icons8.com/color/96/000000/movie.png',
@@ -39,7 +39,17 @@ const movieDatabase = {
     'tt1136617': { title: 'Inside Out 2', year: '2024' },
     'tt21235248': { title: 'Bad Boys Ride or Die', year: '2024' },
     'tt13287846': { title: 'A Quiet Place Day One', year: '2024' },
-    'tt12584954': { title: 'Kingdom of the Planet of the Apes', year: '2024' }
+    'tt0468569': { title: 'The Dark Knight', year: '2008' },
+    'tt1375666': { title: 'Inception', year: '2010' },
+    'tt0816692': { title: 'Interstellar', year: '2014' },
+    'tt0111161': { title: 'The Shawshank Redemption', year: '1994' },
+    'tt0133093': { title: 'The Matrix', year: '1999' },
+    'tt0109830': { title: 'Forrest Gump', year: '1994' },
+    'tt0120737': { title: 'The Lord of the Rings', year: '2001' },
+    'tt0167260': { title: 'The Lord of the Rings: The Two Towers', year: '2002' },
+    'tt0167261': { title: 'The Lord of the Rings: The Return of the King', year: '2003' },
+    'tt0241527': { title: 'Harry Potter and the Sorcerer\'s Stone', year: '2001' },
+    'tt0295297': { title: 'Harry Potter and the Chamber of Secrets', year: '2002' }
 };
 
 // دالة Real-Debrid مبسطة
@@ -122,10 +132,11 @@ builder.defineStreamHandler(async ({ id, type }) => {
             // التحقق مع Real-Debrid
             const rdResult = await checkRealDebrid(torrent.magnet, RD_API_KEY);
             
-            // ⭐⭐⭐ التعديل هنا ⭐⭐⭐
+            // تأكد من وجود جميع القيم
             const quality = torrent.quality || 'HD';
             const size = torrent.size || 'Unknown';
             const seeders = torrent.seeders || '?';
+            const infoHash = torrent.info_hash || generateHash(torrent.title + i);
             
             if (rdResult && rdResult.cached) {
                 // Real-Debrid cached
@@ -135,7 +146,7 @@ builder.defineStreamHandler(async ({ id, type }) => {
                 streams.push({
                     name: `${qualityIcon} ${quality}`,
                     title: `🎬 ${torrent.title}\n📊 ${quality} | 💾 ${size} | 👤 ${seeders} seeds\n✅ CACHED ON REAL-DEBRID`,
-                    url: `rd://stream/${torrent.info_hash}`
+                    url: `rd://stream/${infoHash}`
                 });
                 
             } else {
@@ -146,7 +157,7 @@ builder.defineStreamHandler(async ({ id, type }) => {
                 streams.push({
                     name: `${qualityIcon} ${quality}`,
                     title: `🎬 ${torrent.title}\n📊 ${quality} | 💾 ${size} | 👤 ${seeders} seeds\n⚠️ ADD TO REAL-DEBRID TO STREAM`,
-                    infoHash: torrent.info_hash,
+                    infoHash: infoHash,
                     fileIdx: 0
                 });
             }
@@ -202,7 +213,7 @@ function generateHash(str) {
 }
 
 console.log('='.repeat(70));
-console.log('🚀 Souhail RD Streams v1.2');
+console.log('🚀 Souhail RD Streams v1.2 - FINAL RELEASE');
 console.log('💎 Real-Debrid:', RD_API_KEY ? '✅ CONNECTED' : '❌ NOT SET');
 console.log('🔍 Torrent Search: ✅ ENABLED');
 console.log('🎬 Supported Movies:', Object.keys(movieDatabase).length);
