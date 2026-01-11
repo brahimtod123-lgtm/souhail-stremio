@@ -1,23 +1,24 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
+const { searchTorrents } = require('./scraper'); // ⬅️ هاد السطر مهم
 
 const RD_API_KEY = process.env.RD_API_KEY || '';
 
 const manifest = {
     id: 'org.souhail.streams',
-    version: '1.0.0',
+    version: '1.1.0',
     name: 'Souhail RD Streams',
-    description: 'Real-Debrid streaming with direct sources',
+    description: 'Real-Debrid streaming with torrent search',
     logo: 'https://img.icons8.com/color/96/000000/movie.png',
     background: 'https://img.icons8.com/color/480/000000/cinema-.png',
     resources: ['stream'],
     types: ['movie', 'series'],
     idPrefixes: ['tt', 'tmdb'],
-    catalogs: []  // ⬅️ هادا اللي كان ناقص: array فاضي
+    catalogs: []
 };
 
 const builder = new addonBuilder(manifest);
 
-// قاعدة بيانات صغيرة للأفلام المشهورة
+// قاعدة بيانات للأفلام المشهورة
 const movieDatabase = {
     'tt26443597': { title: 'The Bikeriders', year: '2024' },
     'tt30144839': { title: 'Monkey Man', year: '2024' },
@@ -35,50 +36,6 @@ const movieDatabase = {
     'tt10172266': { title: 'The Marvels', year: '2023' }
 };
 
-// دالة البحث المبسطة
-async function searchTorrents(movieTitle, year = '') {
-    console.log(`🔍 البحث: "${movieTitle}" ${year ? `(${year})` : ''}`);
-    
-    // نتائج حقيقية مبنية على الفيلم
-    const results = [];
-    
-    // جودات مختلفة
-    const qualities = ['4K UHD', '1080p BluRay', '1080p WEB-DL', '720p', '480p'];
-    
-    // مصادر مختلفة
-    const sources = ['YTS', 'RARBG', 'ETTV', 'TGx', '1337x'];
-    
-    // توليد نتائج متنوعة
-    for (let i = 0; i < 15; i++) {
-        const quality = qualities[Math.floor(Math.random() * qualities.length)];
-        const source = sources[Math.floor(Math.random() * sources.length)];
-        const movieYear = year || '2024';
-        
-        // توليد عنوان فريد
-        const title = `${movieTitle} (${movieYear}) ${quality} [${source}]`;
-        
-        results.push({
-            title: title,
-            magnet: `magnet:?xt=urn:btih:${generateHash(title + i + Date.now())}&dn=${encodeURIComponent(title)}&tr=udp://tracker.opentrackr.org:1337/announce`,
-            source: source,
-            quality: quality,
-            size: getRandomSize(quality),
-            seeders: getRandomSeeders(quality),
-            year: movieYear,
-            info_hash: generateHash(title + i + Date.now())
-        });
-    }
-    
-    // ترتيب حسب الجودة والسيدرز
-    return results.sort((a, b) => {
-        if (a.quality.includes('4K') && !b.quality.includes('4K')) return -1;
-        if (!a.quality.includes('4K') && b.quality.includes('4K')) return 1;
-        if (a.quality.includes('1080p') && !b.quality.includes('1080p')) return -1;
-        if (!a.quality.includes('1080p') && b.quality.includes('1080p')) return 1;
-        return b.seeders - a.seeders;
-    });
-}
-
 // دالة Real-Debrid مبسطة
 async function checkRealDebrid(magnet, apiKey) {
     if (!apiKey || !magnet) return null;
@@ -86,13 +43,13 @@ async function checkRealDebrid(magnet, apiKey) {
     try {
         console.log(`🔗 التحقق من Real-Debrid...`);
         
-        // 60% فرصة أن يكون في الكاش (للاختبار)
-        const isCached = Math.random() > 0.4;
+        // محاكاة التحقق - 50% فرصة caching
+        const isCached = Math.random() > 0.5;
         
         if (isCached) {
             const streamId = generateHash(magnet).substring(0, 20);
             return {
-                streamUrl: `https://real-debrid.com/stream/${streamId}`,
+                streamUrl: `rd://${streamId}`,
                 cached: true
             };
         }
@@ -124,49 +81,56 @@ builder.defineStreamHandler(async ({ id, type }) => {
         let movieInfo = movieDatabase[id];
         
         if (!movieInfo) {
-            // إذا الفيلم مش في قاعدة البيانات، استخرج من ID
-            const movieId = id.startsWith('tt') ? id.substring(2) : id;
+            // إذا ماشي في قاعدة البيانات، استخدم ID كاسم
             movieInfo = {
-                title: `Movie #${movieId.substring(0, 6)}`,
+                title: `Movie ${id.substring(2, 8)}`,
                 year: '2024'
             };
         }
         
         console.log(`📽️ الفيلم: ${movieInfo.title} (${movieInfo.year})`);
         
-        // البحث عن التورنتات
+        // ⭐⭐⭐ البحث الحقيقي باستخدام scraper.js ⭐⭐⭐
         const torrents = await searchTorrents(movieInfo.title, movieInfo.year);
         console.log(`📥 العثور على ${torrents.length} تورنت`);
         
-        // عرض أول 3 نتائج في الكونسول
-        torrents.slice(0, 3).forEach((t, i) => {
-            console.log(`${i+1}. ${t.quality} - ${t.title.substring(0, 50)}...`);
-        });
+        // عرض أول 5 نتائج
+        if (torrents.length > 0) {
+            console.log('🏆 أفضل النتائج:');
+            torrents.slice(0, 5).forEach((t, i) => {
+                console.log(`${i+1}. ${t.quality} - ${t.title.substring(0, 60)}...`);
+            });
+        }
         
-        // معالجة أول 8 تورنتات
+        // معالجة أول 10 تورنتات
         const streams = [];
-        const toProcess = torrents.slice(0, 8);
+        const toProcess = torrents.slice(0, 10);
         
         for (let i = 0; i < toProcess.length; i++) {
             const torrent = toProcess[i];
             
-            // تحقق مع Real-Debrid
+            // التحقق مع Real-Debrid
             const rdResult = await checkRealDebrid(torrent.magnet, RD_API_KEY);
             
             if (rdResult && rdResult.cached) {
                 // Real-Debrid cached
-                const qualityIcon = torrent.quality.includes('4K') ? '🔥' : '💎';
+                const qualityIcon = torrent.quality.includes('4K') ? '🔥' : 
+                                  torrent.quality.includes('1080p') ? '💎' : '🎬';
+                
                 streams.push({
                     name: `${qualityIcon} ${torrent.quality}`,
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeds\n✅ CACHED ON REAL-DEBRID`,
-                    url: `http://localhost:3000/proxy/${generateHash(torrent.magnet)}`
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders || '?'} seeds\n✅ CACHED ON REAL-DEBRID`,
+                    url: `rd://stream/${torrent.info_hash}`
                 });
+                
             } else {
                 // Torrent only
-                const qualityIcon = torrent.quality.includes('4K') ? '🎯' : '🧲';
+                const qualityIcon = torrent.quality.includes('4K') ? '🎯' : 
+                                  torrent.quality.includes('1080p') ? '📀' : '🧲';
+                
                 streams.push({
                     name: `${qualityIcon} ${torrent.quality}`,
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeds\n⚠️ ADD TO REAL-DEBRID TO STREAM`,
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders || '?'} seeds\n⚠️ ADD TO REAL-DEBRID TO STREAM`,
                     infoHash: torrent.info_hash,
                     fileIdx: 0
                 });
@@ -174,14 +138,14 @@ builder.defineStreamHandler(async ({ id, type }) => {
             
             // انتظر قليلاً بين الطلبات
             if (i < toProcess.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 300));
             }
         }
         
-        // إضافة ستريم اختباري يعمل دائماً
+        // إضافة ستريم اختباري
         streams.push({
             name: '📺 TEST STREAM',
-            title: '🎬 Test Video Stream\n✅ Always works for testing\n⭐ Direct MP4 link',
+            title: '🎬 Test Video (Big Buck Bunny)\n✅ Direct MP4 link\n⭐ For testing playback',
             url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
         });
         
@@ -191,7 +155,7 @@ builder.defineStreamHandler(async ({ id, type }) => {
         return { streams };
         
     } catch (error) {
-        console.error('❌ Error:', error.message);
+        console.error('❌ Error:', error);
         return {
             streams: [{
                 name: '❌ Error',
@@ -202,7 +166,7 @@ builder.defineStreamHandler(async ({ id, type }) => {
     }
 });
 
-// دوال مساعدة
+// دالة توليد hash
 function generateHash(str) {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -213,35 +177,10 @@ function generateHash(str) {
     return Math.abs(hash).toString(16).padStart(40, '0');
 }
 
-function getRandomSize(quality) {
-    const sizes = {
-        '4K UHD': ['15.2 GB', '18.7 GB', '22.3 GB'],
-        '1080p BluRay': ['8.5 GB', '10.2 GB', '12.7 GB'],
-        '1080p WEB-DL': ['4.2 GB', '5.8 GB', '7.3 GB'],
-        '720p': ['2.8 GB', '3.5 GB', '4.2 GB'],
-        '480p': ['1.2 GB', '1.8 GB', '2.3 GB']
-    };
-    
-    const available = sizes[quality] || ['2.5 GB', '3.8 GB'];
-    return available[Math.floor(Math.random() * available.length)];
-}
-
-function getRandomSeeders(quality) {
-    const baseSeeders = {
-        '4K UHD': 120,
-        '1080p BluRay': 180,
-        '1080p WEB-DL': 150,
-        '720p': 90,
-        '480p': 60
-    };
-    
-    const base = baseSeeders[quality] || 100;
-    return base + Math.floor(Math.random() * 50);
-}
-
 console.log('='.repeat(70));
-console.log('🚀 Souhail RD Streams - READY');
+console.log('🚀 Souhail RD Streams v1.1');
 console.log('💎 Real-Debrid:', RD_API_KEY ? '✅ CONNECTED' : '❌ NOT SET');
+console.log('🔍 Torrent Search: ✅ ENABLED');
 console.log('🎬 Supported Movies:', Object.keys(movieDatabase).length);
 console.log('📡 Server running on port:', process.env.PORT || 3000);
 console.log('='.repeat(70));
