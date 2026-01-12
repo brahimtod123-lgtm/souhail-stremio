@@ -1,2 +1,2 @@
-PORT=3000
-REAL_DEBRID_API=your_api_key_here
+PORT=8080
+REAL_DEBRID_API=your_real_debrid_api_key_here
