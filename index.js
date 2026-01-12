@@ -2,100 +2,80 @@ const express = require('express');
 const fetch = require('node-fetch');
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+// PORT ديال Railway هوا 8080 مش 3000
+const PORT = process.env.PORT || 8080;
 const RD_KEY = process.env.REAL_DEBRID_API;
+
+// Debug log
+console.log(`Starting with PORT: ${PORT}, RD_KEY: ${RD_KEY ? 'yes' : 'no'}`);
 
 // MANIFEST
 app.get('/manifest.json', (req, res) => {
+    console.log('📄 Manifest requested');
     res.json({
         "id": "com.souhail.stremio",
         "version": "1.0.0",
         "name": "Souhail Premium",
         "description": "Real-Debrid Torrent Streaming",
-        "logo": "https://cdn-icons-png.flaticon.com/512/3095/3095588.png",
         "resources": ["stream"],
         "types": ["movie", "series"]
     });
 });
 
-// STREAM - يعطي كلشي
+// STREAM
 app.get('/stream/:type/:id.json', async (req, res) => {
-    if (!RD_KEY) return res.json({ streams: [] });
+    console.log(`🎬 Stream: ${req.params.type}/${req.params.id}`);
+    
+    if (!RD_KEY) {
+        console.log('❌ No RD key');
+        return res.json({ streams: [] });
+    }
     
     try {
-        // 1. جلب ليانات بزاف + أحجام كبيرة
-        const torrentioUrl = `https://torrentio.strem.fun/realdebrid=${RD_KEY}/quality=size:desc/stream/${req.params.type}/${req.params.id}.json`;
+        const torrentioUrl = `https://torrentio.strem.fun/realdebrid=${RD_KEY}/stream/${req.params.type}/${req.params.id}.json`;
+        console.log(`🔗 Fetching: ${torrentioUrl}`);
+        
         const response = await fetch(torrentioUrl);
         const data = await response.json();
         
-        if (!data.streams) return res.json({ streams: [] });
-        
-        // 2. فلترة للأحجام الكبيرة فقط (1GB+)
-        const largeStreams = data.streams.filter(stream => {
-            const title = stream.name || stream.title || '';
-            return title.match(/\d+(\.\d+)?\s*GB/i) && parseFloat(title.match(/\d+(\.\d+)?/)[0]) >= 1;
-        }).slice(0, 15); // 3. ليانات بزاف (15 رابط)
-        
-        // 3. إضافة معلومات كاملة
-        const processedStreams = largeStreams.map(stream => {
-            const title = stream.name || stream.title || '';
-            const isCached = stream.url.includes('real-debrid.com');
-            
-            const size = (title.match(/(\d+(\.\d+)?)\s*GB/i) || [''])[0];
-            const quality = title.includes('4K') ? '4K' : 
-                           title.includes('1080p') ? '1080p' : 'HD';
-            const seeders = (title.match(/(\d+)\s*Seeds?/i) || [])[1] || '?';
-            
-            return {
-                title: `🎬 ${size} | 📺 ${quality} | 👤 ${seeders} | ${isCached ? '✅ Cached' : '🔗 Torrent'}`,
-                url: stream.url,
-                behaviorHints: stream.behaviorHints || {}
-            };
-        });
-        
-        res.json({ streams: processedStreams });
+        console.log(`✅ Found ${data.streams?.length || 0} streams`);
+        res.json(data);
         
     } catch (error) {
+        console.log('❌ Error:', error.message);
         res.json({ streams: [] });
     }
 });
 
-// INSTALL - تثبيت سهل
+// INSTALL
 app.get('/install', (req, res) => {
+    const baseUrl = `https://${req.hostname}`;
     res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Install Souhail Addon</title>
-            <style>
-                body { font-family: Arial; text-align: center; padding: 50px; }
-                .btn { 
-                    display: inline-block; 
-                    background: #28a745; 
-                    color: white; 
-                    padding: 15px 30px; 
-                    text-decoration: none; 
-                    border-radius: 5px; 
-                    font-size: 18px; 
-                    margin: 20px; 
-                }
-            </style>
-        </head>
-        <body>
-            <h2>📲 Install Souhail Addon</h2>
-            <a class="btn" href="stremio://stremio.xyz/app/${req.hostname}/manifest.json">
-                Click to Install
-            </a>
-            <p>Or copy: <code>https://${req.hostname}/manifest.json</code></p>
-        </body>
-        </html>
+        <h2>Install Souhail Addon</h2>
+        <a href="stremio://stremio.xyz/app/${req.hostname}/manifest.json">
+            Install Now
+        </a>
+        <p>Or: <code>${baseUrl}/manifest.json</code></p>
+        <p><a href="${baseUrl}/stream/movie/tt1375666.json">Test</a></p>
     `);
+});
+
+// HEALTH CHECK
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        port: PORT,
+        realdebrid: RD_KEY ? 'configured' : 'not_configured'
+    });
 });
 
 app.get('/', (req, res) => {
     res.redirect('/install');
 });
 
-app.listen(PORT, () => {
-    console.log(`✅ Server ready: http://localhost:${PORT}/install`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🔗 URL: http://localhost:${PORT}`);
+    console.log(`📲 Install: http://localhost:${PORT}/install`);
+    console.log(`📊 Health: http://localhost:${PORT}/health`);
 });
