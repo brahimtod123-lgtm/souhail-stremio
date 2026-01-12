@@ -1,66 +1,52 @@
 const express = require('express');
-const scraper = require('./scraper');
-const provider = require('./provider');
-const RealDebrid = require('./resolver');
-const StreamInfo = require('./streaminfo');
-
 const app = express();
-const port = 3000;
+const PORT = process.env.PORT || 3000;
 
-// المتغيرات
-const REAL_DEBRID_TOKEN = process.env.REAL_DEBRID_API;
-
-// Routes
+// إضافة routes للاختبار
 app.get('/', (req, res) => {
-    res.send(`
-        <h1>Souhail Stremio Streamer</h1>
-        <p>الروابط المتاحة:</p>
-        <ul>
-            <li><a href="/search/avengers">/search/avengers</a> - بحث</li>
-            <li><a href="/catalog/movies">/catalog/movies</a> - أفلام</li>
-            <li><a href="/health">/health</a> - حالة السيرفر</li>
-        </ul>
-    `);
-});
-
-app.get('/search/:query', async (req, res) => {
-    const query = req.params.query;
-    const type = req.query.type || 'movie';
-    
-    const results = await scraper.search(query, type);
     res.json({
-        query: query,
-        count: results.length,
-        results: results
+        message: '🚀 Souhail Stremio Streamer Active!',
+        version: '1.0.0',
+        endpoints: {
+            search: 'GET /search/:query',
+            catalog: 'GET /catalog/:type',
+            health: 'GET /health',
+            test: 'GET /test'
+        }
     });
-});
-
-app.get('/catalog/:type', async (req, res) => {
-    const type = req.params.type;
-    const catalog = await provider.getCatalog(type);
-    res.json(catalog);
-});
-
-app.get('/stream/:magnet', async (req, res) => {
-    const magnet = Buffer.from(req.params.magnet, 'base64').toString();
-    const debrid = new RealDebrid(REAL_DEBRID_TOKEN);
-    const stream = await debrid.getStream(magnet);
-    res.json(stream);
 });
 
 app.get('/health', (req, res) => {
     res.json({
-        status: 'OK',
+        status: 'healthy',
         timestamp: new Date().toISOString(),
-        realdebrid: REAL_DEBRID_TOKEN ? 'connected' : 'missing'
+        uptime: process.uptime()
     });
 });
 
-app.listen(port, () => {
+app.get('/test', (req, res) => {
+    res.send('<h1>✅ Test Successful!</h1><p>Souhail Stremio is working.</p>');
+});
+
+app.get('/search/:query', (req, res) => {
+    res.json({
+        query: req.params.query,
+        results: [
+            { title: 'Test Movie 1', quality: '1080p', size: '1.5GB' },
+            { title: 'Test Movie 2', quality: '720p', size: '800MB' }
+        ]
+    });
+});
+
+app.listen(PORT, () => {
+    console.clear();
     console.log(`
     ==================================
-      Souhail Stremio Streamer
-      Running on: http://localhost:${port}
+    🎬 Souhail Stremio Streamer
+    ==================================
+    ✅ Server running on: http://localhost:${PORT}
+    📍 Health check: http://localhost:${PORT}/health
+    🔍 Test search: http://localhost:${PORT}/search/inception
     ==================================
     `);
 });
