@@ -1,5 +1,6 @@
 const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const parseTorrent = require('parse-torrent');
 const app = express();
 
 const PORT = process.env.PORT || 8080;
@@ -13,10 +14,10 @@ app.use((req, res, next) => {
 // MANIFEST
 app.get('/manifest.json', (req, res) => {
     res.json({
-        "id": "com.souhail.streamer.complete",
-        "version": "2.0.0",
-        "name": "Souhail Complete",
-        "description": "Real-Debrid Torrent Streaming with Full Info",
+        "id": "com.souhail.torrentinfo",
+        "version": "3.0.0",
+        "name": "Souhail Torrent Info",
+        "description": "Displays full torrent information",
         "logo": "https://cdn-icons-png.flaticon.com/512/3095/3095588.png",
         "resources": ["stream"],
         "types": ["movie", "series"],
@@ -24,7 +25,7 @@ app.get('/manifest.json', (req, res) => {
     });
 });
 
-// STREAM مع كل المعلومات
+// STREAM
 app.get('/stream/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
     
@@ -41,205 +42,233 @@ app.get('/stream/:type/:id.json', async (req, res) => {
             return res.json({ streams: [] });
         }
         
-        const processedStreams = data.streams.map((stream) => {
-            const originalTitle = stream.name || stream.title || 'Unknown';
-            const info = extractCompleteInfo(originalTitle);
-            const isCached = stream.url && stream.url.includes('real-debrid.com');
-            
-            return {
-                title: createCompleteTitle(originalTitle, info, isCached),
-                url: stream.url,
-                behaviorHints: stream.behaviorHints || {}
-            };
-        });
+        // جلب معلومات إضافية من مصادر خارجية
+        const movieInfo = await getExternalMovieInfo(id);
+        
+        const processedStreams = await Promise.all(data.streams.map(async (stream) => {
+            try {
+                const isCached = stream.url && stream.url.includes('real-debrid.com');
+                let torrentDetails = {};
+                
+                // محاولة استخراج المغناطيس من الـURL
+                if (stream.url) {
+                    torrentDetails = await extractTorrentDetails(stream.url);
+                }
+                
+                // استعمال العنوان الأصلي + المعلومات الإضافية
+                const originalTitle = stream.name || stream.title || '';
+                const fullInfo = await enrichTitleInfo(originalTitle, torrentDetails, movieInfo);
+                
+                return {
+                    title: createDetailedTitle(fullInfo, isCached),
+                    url: stream.url,
+                    behaviorHints: stream.behaviorHints || {}
+                };
+                
+            } catch (error) {
+                console.error('Error processing stream:', error);
+                // رجع معلومات أساسية إذا فشلت العملية
+                return {
+                    title: `💎🎬 Basic Stream\n💎📡 ${stream.name || 'Torrent'}`,
+                    url: stream.url,
+                    behaviorHints: stream.behaviorHints || {}
+                };
+            }
+        }));
         
         res.json({ streams: processedStreams });
         
     } catch (error) {
+        console.error('Main error:', error);
         res.json({ streams: [] });
     }
 });
 
-// استخراج كامل للمعلومات
-function extractCompleteInfo(fullTitle) {
-    const info = {
-        // اسم الفيلم الأساسي
-        movieName: '',
+// جلب معلومات الفيلم من TMDB
+async function getExternalMovieInfo(imdbId) {
+    try {
+        // يمكنك استخدام TMDB API هنا
+        // سجل في https://www.themoviedb.org/documentation/api
+        // واحصل على API key
         
-        // المعلومات التقنية
-        size: 'Unknown',
-        sizeInBytes: 0,
-        quality: '1080p',
-        seeders: 0,
-        codec: 'H.264',
-        audio: 'AC3',
-        language: 'English',
-        subs: 'EN',
+        const tmdbApiKey = process.env.TMDB_API_KEY; // اختياري
         
-        // معلومات إضافية
-        year: '',
-        source: 'WEB-DL',
-        group: '',
-        site: 'Unknown'
+        if (tmdbApiKey && imdbId.startsWith('tt')) {
+            // البحث عن الفيلم في TMDB
+            const searchUrl = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${tmdbApiKey}&external_source=imdb_id`;
+            const response = await fetch(searchUrl);
+            const data = await response.json();
+            
+            if (data.movie_results && data.movie_results.length > 0) {
+                const movie = data.movie_results[0];
+                return {
+                    title: movie.title,
+                    year: movie.release_date ? movie.release_date.substring(0, 4) : '',
+                    rating: movie.vote_average,
+                    duration: movie.runtime,
+                    overview: movie.overview
+                };
+            }
+        }
+        
+        // إذا ماكانش TMDB، استعمل معلومات أساسية
+        return {
+            title: imdbId.startsWith('tt') ? `IMDB: ${imdbId}` : 'Movie',
+            year: '',
+            rating: '',
+            duration: ''
+        };
+        
+    } catch (error) {
+        return { title: '', year: '', rating: '', duration: '' };
+    }
+}
+
+// استخراج تفاصيل التورنت من المغناطيس
+async function extractTorrentDetails(url) {
+    const details = {
+        name: '',
+        size: 0,
+        files: [],
+        infoHash: ''
     };
     
-    if (!fullTitle) return info;
-    
-    // 1. استخراج اسم الموقع (أولاً)
-    const sitePatterns = [
-        { pattern: /\[(.*?)\]/g, extract: 'brackets' },
-        { pattern: /\((.*?)\)/g, extract: 'parentheses' },
-        { pattern: /\b(YTS|RARBG|ETRG|UTR|Tigole|QxR|Vyndros|FraMeSToR|PSA|CRiSC)\b/i, extract: 'name' }
-    ];
-    
-    for (const sitePattern of sitePatterns) {
-        const matches = fullTitle.match(sitePattern.pattern);
-        if (matches && matches.length > 0) {
-            if (sitePattern.extract === 'brackets') {
-                info.site = matches[0].replace(/[\[\]]/g, '');
-            } else if (sitePattern.extract === 'parentheses') {
-                info.site = matches[0].replace(/[\(\)]/g, '');
-            } else {
-                info.site = matches[0];
+    try {
+        // إذا كان الرابط يحتوي على معلومات المغناطيس
+        if (url.includes('magnet:?')) {
+            const magnetUri = url.split('&dn=')[1] || '';
+            if (magnetUri) {
+                details.name = decodeURIComponent(magnetUri.split('&')[0]);
             }
-            break;
         }
+        
+        // يمكن إضافة parsing للمغناطيس هنا
+        // باستخدام مكتبة مثل 'parse-torrent'
+        
+        return details;
+    } catch (error) {
+        return details;
     }
-    
-    // 2. استخراج الحجم
-    const sizeMatch = fullTitle.match(/(\d+(\.\d+)?)\s*(GB|MB|GiB|MiB)/i);
-    if (sizeMatch) {
-        const num = parseFloat(sizeMatch[1]);
-        const unit = sizeMatch[3].toUpperCase();
-        const isGB = unit.includes('GB') || unit.includes('GIB');
-        info.size = `${num} ${isGB ? 'GB' : 'MB'}`;
-        info.sizeInBytes = isGB ? num * 1073741824 : num * 1048576;
-    }
-    
-    // 3. استخراج الجودة
-    if (fullTitle.match(/4K|UHD|2160p/i)) {
-        info.quality = '4K';
-    } else if (fullTitle.match(/1080p|FHD/i)) {
-        info.quality = '1080p';
-    } else if (fullTitle.match(/720p|HD/i)) {
-        info.quality = '720p';
-    } else if (fullTitle.match(/480p|SD/i)) {
-        info.quality = '480p';
-    }
-    
-    // 4. استخراج السيدرز
-    const seedersMatch = fullTitle.match(/(\d+)\s*Seeds?/i) || 
-                        fullTitle.match(/Seeds?:?\s*(\d+)/i) ||
-                        fullTitle.match(/S:\s*(\d+)/i);
-    if (seedersMatch) {
-        info.seeders = parseInt(seedersMatch[1]);
-    }
-    
-    // 5. استخراج الكودك
-    if (fullTitle.match(/x265|HEVC/i)) info.codec = 'HEVC';
-    else if (fullTitle.match(/AV1/i)) info.codec = 'AV1';
-    else if (fullTitle.match(/VP9/i)) info.codec = 'VP9';
-    else if (fullTitle.match(/x264/i)) info.codec = 'H.264';
-    
-    // 6. استخراج الصوت
-    if (fullTitle.match(/DDP5\.1|Dolby Digital Plus/i)) info.audio = 'DDP5.1';
-    else if (fullTitle.match(/DTS-HD|DTS-HD MA/i)) info.audio = 'DTS-HD MA';
-    else if (fullTitle.match(/TrueHD/i)) info.audio = 'TrueHD';
-    else if (fullTitle.match(/AC3|Dolby Digital/i)) info.audio = 'AC3';
-    else if (fullTitle.match(/AAC/i)) info.audio = 'AAC';
-    
-    // 7. استخراج اللغة
-    if (fullTitle.match(/Arabic|AR|Arabe/i)) info.language = 'Arabic';
-    else if (fullTitle.match(/French|FR|Français/i)) info.language = 'French';
-    else if (fullTitle.match(/Spanish|ES|Español/i)) info.language = 'Spanish';
-    else if (fullTitle.match(/Multi/i)) info.language = 'Multi';
-    
-    // 8. استخراج الترجمة
-    if (fullTitle.match(/Arabic Subs|AR-Subs/i)) info.subs = 'AR';
-    else if (fullTitle.match(/French Subs|FR-Subs/i)) info.subs = 'FR';
-    else if (fullTitle.match(/English Subs|EN-Subs/i)) info.subs = 'EN';
-    else if (fullTitle.match(/Spanish Subs|ES-Subs/i)) info.subs = 'ES';
-    else if (fullTitle.match(/Multi Subs/i)) info.subs = 'Multi';
-    
-    // 9. استخراج السنة
-    const yearMatch = fullTitle.match(/(19|20)\d{2}/);
-    if (yearMatch) info.year = yearMatch[0];
-    
-    // 10. استخراج المصدر
-    if (fullTitle.match(/BluRay|Blu-Ray|BD/i)) info.source = 'BluRay';
-    else if (fullTitle.match(/WEB-DL|WEB/i)) info.source = 'WEB-DL';
-    else if (fullTitle.match(/WEBRip/i)) info.source = 'WEBRip';
-    else if (fullTitle.match(/HDTV/i)) info.source = 'HDTV';
-    else if (fullTitle.match(/DVD/i)) info.source = 'DVD';
-    
-    // 11. استخراج المجموعة
-    const groupMatch = fullTitle.match(/-\s*(.*?)\s*\[/i) || 
-                      fullTitle.match(/-\s*(.*?)\s*$/i);
-    if (groupMatch && groupMatch[1]) {
-        info.group = groupMatch[1].trim();
-    }
-    
-    // 12. استخراج اسم الفيلم (بعد إزالة كل المعلومات الفنية)
-    info.movieName = extractMovieName(fullTitle);
+}
+
+// إثراء المعلومات
+async function enrichTitleInfo(originalTitle, torrentDetails, movieInfo) {
+    const info = {
+        // من الفيلم الخارجي
+        movieName: movieInfo.title || '',
+        year: movieInfo.year || '',
+        rating: movieInfo.rating || '',
+        duration: movieInfo.duration || '',
+        
+        // من العنوان الأصلي
+        size: extractSize(originalTitle),
+        quality: extractQuality(originalTitle),
+        seeders: extractSeeders(originalTitle),
+        codec: extractCodec(originalTitle),
+        audio: extractAudio(originalTitle),
+        language: extractLanguage(originalTitle),
+        subs: extractSubs(originalTitle),
+        source: extractSource(originalTitle),
+        site: extractSite(originalTitle),
+        
+        // من التورنت
+        torrentName: torrentDetails.name || originalTitle,
+        fileCount: torrentDetails.files ? torrentDetails.files.length : 1
+    };
     
     return info;
 }
 
-// استخراج اسم الفيلم النظيف
-function extractMovieName(fullTitle) {
-    let cleanTitle = fullTitle;
-    
-    // إزالة المعلومات التقنية
-    cleanTitle = cleanTitle.replace(/\[.*?\]/g, '');
-    cleanTitle = cleanTitle.replace(/\./g, ' ');
-    cleanTitle = cleanTitle.replace(/\s+/g, ' ');
-    
-    // إزالة الجودة
-    cleanTitle = cleanTitle.replace(/(4K|2160p|1080p|720p|480p)/gi, '');
-    
-    // إزالة الحجم
-    cleanTitle = cleanTitle.replace(/(\d+(\.\d+)?)\s*(GB|MB)/gi, '');
-    
-    // إزالة السيدرز
-    cleanTitle = cleanTitle.replace(/(\d+)\s*Seeds?/gi, '');
-    
-    // إزالة الكودك
-    cleanTitle = cleanTitle.replace(/x265|x264|HEVC|AV1|VP9/gi, '');
-    
-    // إزالة الصوت
-    cleanTitle = cleanTitle.replace(/DDP5\.1|DTS-HD|TrueHD|AC3|AAC/gi, '');
-    
-    // إزالة المصدر
-    cleanTitle = cleanTitle.replace(/BluRay|WEB-DL|WEBRip|HDTV|DVD/gi, '');
-    
-    // تنظيف نهائي
-    cleanTitle = cleanTitle
-        .replace(/\s+/g, ' ')
-        .replace(/^\s+|\s+$/g, '')
-        .substring(0, 60);
-    
-    return cleanTitle || 'Movie';
+// دوال الاستخراج
+function extractSize(title) {
+    const match = title.match(/(\d+(\.\d+)?)\s*(GB|MB|GiB|MiB)/i);
+    return match ? match[0] : 'Unknown';
 }
 
-// إنشاء العنوان الكامل
-function createCompleteTitle(originalTitle, info, isCached) {
+function extractQuality(title) {
+    if (title.match(/4K|UHD/i)) return '4K';
+    if (title.match(/2160p/i)) return '2160p';
+    if (title.match(/1080p|FHD/i)) return '1080p';
+    if (title.match(/720p|HD/i)) return '720p';
+    if (title.match(/480p|SD/i)) return '480p';
+    return '1080p';
+}
+
+function extractSeeders(title) {
+    const match = title.match(/(\d+)\s*Seeds?/i);
+    return match ? parseInt(match[1]) : 0;
+}
+
+function extractCodec(title) {
+    if (title.match(/x265|HEVC/i)) return 'HEVC';
+    if (title.match(/AV1/i)) return 'AV1';
+    if (title.match(/VP9/i)) return 'VP9';
+    return 'H.264';
+}
+
+function extractAudio(title) {
+    if (title.match(/DDP5\.1|Dolby Digital Plus/i)) return 'DDP5.1';
+    if (title.match(/DTS-HD|DTS-HD MA/i)) return 'DTS-HD';
+    if (title.match(/TrueHD/i)) return 'TrueHD';
+    if (title.match(/AC3|Dolby Digital/i)) return 'AC3';
+    if (title.match(/AAC/i)) return 'AAC';
+    return 'AC3';
+}
+
+function extractLanguage(title) {
+    if (title.match(/Arabic|AR|Arabe/i)) return 'Arabic';
+    if (title.match(/French|FR|Français/i)) return 'French';
+    if (title.match(/Spanish|ES|Español/i)) return 'Spanish';
+    if (title.match(/Multi/i)) return 'Multi';
+    return 'English';
+}
+
+function extractSubs(title) {
+    if (title.match(/Arabic Subs|AR-Subs/i)) return 'AR';
+    if (title.match(/French Subs|FR-Subs/i)) return 'FR';
+    if (title.match(/English Subs|EN-Subs/i)) return 'EN';
+    if (title.match(/Spanish Subs|ES-Subs/i)) return 'ES';
+    if (title.match(/Multi Subs/i)) return 'Multi';
+    return 'EN';
+}
+
+function extractSource(title) {
+    if (title.match(/BluRay|Blu-Ray|BD/i)) return 'BluRay';
+    if (title.match(/WEB-DL|WEB/i)) return 'WEB-DL';
+    if (title.match(/WEBRip/i)) return 'WEBRip';
+    if (title.match(/HDTV/i)) return 'HDTV';
+    if (title.match(/DVD/i)) return 'DVD';
+    return 'WEB-DL';
+}
+
+function extractSite(title) {
+    const siteMatch = title.match(/\[(.*?)\]/);
+    return siteMatch ? siteMatch[1] : 'Torrent';
+}
+
+// إنشاء العنوان المفصل
+function createDetailedTitle(info, isCached) {
     const lines = [];
     
-    // سطر 1: اسم الفيلم + السنة
-    const titleLine = info.movieName + (info.year ? ` (${info.year})` : '');
-    lines.push(`💎🎬 ${titleLine || 'Movie'}`);
+    // سطر 1: اسم الفيلم + السنة + التقييم
+    let titleLine = `💎🎬 ${info.movieName || info.torrentName.substring(0, 40)}`;
+    if (info.year) titleLine += ` (${info.year})`;
+    if (info.rating) titleLine += ` ⭐ ${info.rating}/10`;
+    lines.push(titleLine);
     
     // سطر 2: الحجم + الجودة + السيدرز
     lines.push(`💎💾 ${info.size}  |  💎📺 ${info.quality}  |  💎🧑‍🔧 ${info.seeders || '?'}`);
     
-    // سطر 3: الكودك + الصوت
-    lines.push(`💎🎞️ ${info.codec}  |  💎🎧 ${info.audio}`);
+    // سطر 3: التقنية
+    lines.push(`💎🎞️ ${info.codec}  |  💎🎧 ${info.audio}  |  💎📦 ${info.source}`);
     
-    // سطر 4: اللغة + الترجمة
-    lines.push(`💎🔊 ${info.language}  |  💎🌐 ${info.subs}`);
+    // سطر 4: اللغات
+    lines.push(`💎🔊 ${info.language}  |  💎🌐 ${info.subs}  |  💎🌍 ${info.site}`);
     
-    // سطر 5: المصدر + الموقع
-    lines.push(`💎📦 ${info.source}  |  💎🌍 ${info.site || 'Torrent Site'}`);
+    // سطر 5: المدة + الموقع
+    if (info.duration) {
+        lines.push(`💎⏱️ ${info.duration} min  |  💎📁 ${info.fileCount} files`);
+    }
     
     // سطر 6: النوع
     lines.push(isCached ? '💎🧲 RD Cached' : '💎📡 Torrent');
@@ -247,45 +276,41 @@ function createCompleteTitle(originalTitle, info, isCached) {
     return lines.join('\n');
 }
 
-// صفحة Install
+// صفحات المساعدة
 app.get('/install', (req, res) => {
     res.send(`
         <html>
         <body style="font-family: Arial; padding: 20px; text-align: center;">
-            <h1>📲 Install Souhail Complete</h1>
+            <h1>📲 Install</h1>
             <a href="stremio://stremio.xyz/app/${req.hostname}/manifest.json" 
-               style="display: inline-block; background: #28a745; color: white; padding: 15px 30px; border-radius: 5px; text-decoration: none; margin: 20px 0;">
+               style="display: inline-block; background: #28a745; color: white; padding: 15px 30px; border-radius: 5px; text-decoration: none;">
                 Install Now
             </a>
-            <p>Or copy to Stremio:</p>
-            <code style="background: #f4f4f4; padding: 10px; display: block;">https://${req.hostname}/manifest.json</code>
-            <p><a href="/">← Home</a> | <a href="/test">Test</a></p>
+            <p><code>https://${req.hostname}/manifest.json</code></p>
+            <p><a href="/test">Test Page</a></p>
         </body>
         </html>
     `);
 });
 
-// صفحة Test
 app.get('/test', (req, res) => {
     res.send(`
         <html>
         <body style="font-family: Arial; padding: 20px;">
-            <h1>🧪 Test Page</h1>
-            <h3>Example Output:</h3>
-            <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
-💎🎬 Inception (2010)
+            <h1>Test Page</h1>
+            <h3>Expected Output:</h3>
+            <pre style="background: #f8f9fa; padding: 15px;">
+💎🎬 Inception (2010) ⭐ 8.8/10
 💎💾 1.8 GB  |  💎📺 1080p  |  💎🧑‍🔧 1500
-💎🎞️ H.264  |  💎🎧 DTS-HD
-💎🔊 English  |  💎🌐 EN
-💎📦 BluRay  |  💎🌍 YTS
+💎🎞️ H.264  |  💎🎧 DTS-HD  |  💎📦 BluRay
+💎🔊 English  |  💎🌐 EN  |  💎🌍 YTS
+💎⏱️ 148 min  |  💎📁 1 files
 💎🧲 RD Cached</pre>
             
-            <h3>Test Links:</h3>
+            <h3>Test:</h3>
             <ul>
                 <li><a href="/stream/movie/tt1375666.json">Inception</a></li>
                 <li><a href="/stream/movie/tt0816692.json">Interstellar</a></li>
-                <li><a href="/stream/movie/tt0468569.json">The Dark Knight</a></li>
-                <li><a href="/stream/series/tt0944947.json">Game of Thrones</a></li>
             </ul>
         </body>
         </html>
@@ -296,15 +321,15 @@ app.get('/', (req, res) => {
     res.send(`
         <html>
         <body style="font-family: Arial; padding: 20px; text-align: center;">
-            <h1>🎬 Souhail Complete Addon</h1>
-            <p><a href="/install" style="font-size: 18px;">📲 Install Addon</a></p>
-            <p>Real-Debrid: ${RD_KEY ? '✅ Configured' : '❌ Not Configured'}</p>
-            <p>Displays: Movie Name, Size, Quality, Seeders, Codec, Audio, Language, Subtitles, Source, Site</p>
+            <h1>🎬 Souhail Torrent Info</h1>
+            <p>Displays complete torrent information</p>
+            <p><a href="/install">📲 Install Addon</a></p>
+            <p>Real-Debrid: ${RD_KEY ? '✅' : '❌'}</p>
         </body>
         </html>
     `);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`✅ Server: http://localhost:${PORT}`);
 });
