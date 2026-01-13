@@ -15,7 +15,7 @@ app.get("/manifest.json", (req, res) => {
   res.json({
     id: "com.souhail.stremio",
     version: "1.0.0",
-    name: "Souhail Premium",
+    name: "♻️🟢Souhail Premium🟢♻️",
     description: "Real-Debrid Streams (Clean & Technical)",
     resources: ["stream"],
     types: ["movie", "series"]
@@ -50,14 +50,14 @@ app.get("/stream/:type/:id.json", async (req, res) => {
           ...s,
           name: "💥🟢 SOUHAIL / RD 🟢💥",
           title: `
-♻️🎬 ${cleanTitle(title)}
-♻️📽️ ${extract(title, /(2160p|1080p|720p)/i)}
-♻️🎞️ ${extract(title, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
-♻️🔊 ${extract(title, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
-♻️💾 ${formatSize(extractSize(title))}
-♻️🌍 EN / AR
-♻️⚡ RD Cached
-♻️🧲 ${extract(title, /(YTS|RARBG|TPB|ThePirateBay|1337x)/i) || "Torrent"}
+1️⃣♻️🎬 ${cleanTitle(title)}
+2️⃣♻️💾 ${formatSize(extractSize(title))}
+3️⃣♻️📽️ ${extract(title, /(2160p|1080p|720p)/i)}
+3️⃣♻️🎞️ ${extract(title, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
+5️⃣♻️🔊 ${extract(title, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
+6️⃣♻️🌍 EN / AR
+7️⃣♻️⚡ RD Cached
+8️⃣♻️🧲 ${extract(title, /(YTS|RARBG|TPB|ThePirateBay|1337x)/i) || "Torrent"}
           `.trim()
         };
       });
